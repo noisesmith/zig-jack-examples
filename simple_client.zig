@@ -15,12 +15,13 @@ var client: ?*c.jack_client_t = undefined;
 
 const c_null = @as(c_int, 0);
 const null_ptr = @intToPtr(?*c_void, c_null);
+const null_ports = @intToPtr(?*align(8) u8, c_null);
 const long_null = @as(c_long, c_null);
 const null_client = @ptrCast(?*c.jack_client_t, @intToPtr(?*c_void, c_null));
 const c_int_zero = @intCast(c_uint, @as(c_int, 0));
 
 pub fn main() u8 {
-    var ports: [*c][*c]const u8 = undefined;
+    var ports: *[*:0]const u8 = undefined;
     var client_name: [*:0]const u8 = "simple";
     var server_name: [*c]const u8 = null;
     var options: c.jack_options_t = @intToEnum(c.jack_options_t, c.JackNullOption);
@@ -62,19 +63,20 @@ pub fn main() u8 {
         print("cannot activate client\n", .{});
         exit(1);
     }
-    const null_ports = @ptrCast([*c][*c]const u8, @alignCast(@alignOf([*c]const u8), null_ptr));
     const hardware_output = @bitCast(c_ulong, @as(c_long, (c.JackPortIsPhysical | c.JackPortIsOutput)));
-    ports = c.jack_get_ports(client, null, null, hardware_output);
-    if (ports == null_ports) {
+    var ports_raw = c.jack_get_ports(client, null, null, hardware_output);
+    ports = @ptrCast(*[*:0]const u8, ports_raw);
+    if (@ptrCast(?* u8, ports) == null_ports) {
         print("no physical capture ports available\n", .{});
         exit(1);
     }
-    if (c.jack_connect(client, ports[c_int_zero], c.jack_port_name(input)) != 0) {
+    if (c.jack_connect(client, ports.*, c.jack_port_name(input)) != 0) {
         print("cannot connect input ports\n", .{});
     }
     const hardware_input = @bitCast(c_ulong, @as(c_long, (c.JackPortIsPhysical | c.JackPortIsInput)));
-    ports = c.jack_get_ports(client, null, null, hardware_input);
-    if (c.jack_connect(client, c.jack_port_name(output), ports[c_int_zero]) != 0) {
+    ports_raw = c.jack_get_ports(client, null, null, hardware_input);
+    ports = @ptrCast(*[*:0]const u8, ports_raw);
+    if (c.jack_connect(client, c.jack_port_name(output), ports.*) != 0) {
         print("connot connect output ports", .{});
     }
     c.free(@ptrCast(?*c_void, ports));
