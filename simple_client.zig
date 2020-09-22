@@ -17,29 +17,35 @@ const c_null = @as(c_int, 0);
 const null_ptr = @intToPtr(?*c_void, c_null);
 const null_ports = @intToPtr(?*align(8) u8, c_null);
 const long_null = @as(c_long, c_null);
-const null_client = @ptrCast(?*c.jack_client_t, @intToPtr(?*c_void, c_null));
-const c_int_zero = @intCast(c_uint, @as(c_int, 0));
+const null_client = @ptrCast(?*c.jack_client_t, null_ptr);
+const data_desc = "32 bit float mono audio";
+const null_port = @ptrCast(?*c.jack_port_t, null_ptr);
+const client_options = @intToEnum(c.jack_options_t, c.JackNullOption);
+const sample_size = @sizeOf(c.jack_default_audio_sample_t);
 
 pub fn main() u8 {
     var ports: *[*:0]const u8 = undefined;
     var client_name: [*:0]const u8 = "simple";
-    var server_name: [*c]const u8 = null;
-    var options: c.jack_options_t = @intToEnum(c.jack_options_t, c.JackNullOption);
+    var server_name: ?*const u8 = null;
     var status: c.jack_status_t = undefined;
+    var status_code: i32 = undefined;
+    var ports_raw: [*c][*c]const u8 = undefined;
 
-    client = c.jack_client_open(client_name, options, &status, server_name);
-    var status_code = @enumToInt(status);
+    client = c.jack_client_open(client_name, client_options,
+        &status, server_name);
+    status_code = @enumToInt(status);
+
     if (client == null_client) {
         print("jack_client_open() failed, status = {}\n", .{status_code});
-        if ((status_code & @bitCast(c_int, c.JackServerFailed)) != 0) {
+        if ((status_code & c.JackServerFailed) != 0) {
             print("failed to connect to JACK server\n", .{});
         }
         exit(2);
     }
-    if ((status_code & @bitCast(c_int, c.JackServerStarted)) != 0) {
+    if ((status_code & c.JackServerStarted) != 0) {
         print("new jack server started\n", .{});
     }
-    if ((status_code & @bitCast(c_int, c.JackNameNotUnique)) != 0) {
+    if ((status_code & c.JackNameNotUnique) != 0) {
         client_name = c.jack_get_client_name(client);
         print("unique name '{}' assigned\n", .{client_name});
     }
@@ -47,24 +53,23 @@ pub fn main() u8 {
     _ = c.jack_set_process_callback(client, process_audio, null);
     c.jack_on_shutdown(client, jack_shutdown, null);
     print("engine sample rate: {}\n", .{c.jack_get_sample_rate(client)});
-    const data_desc = "32 bit float mono audio";
-    const in_port_flag = @bitCast(c_ulong, @as(c_long, c.JackPortIsInput));
-    input = c.jack_port_register(client, "input", data_desc, in_port_flag, long_null);
-    const out_port_flag = @bitCast(c_ulong, @as(c_long, c.JackPortIsOutput));
-    output = c.jack_port_register(client, "output", data_desc, out_port_flag, long_null);
 
-    const null_port = @ptrCast(?*c.jack_port_t, null_ptr);
+    input = c.jack_port_register(client, "input", data_desc,
+        c.JackPortIsInput, long_null);
+    output = c.jack_port_register(client, "output", data_desc,
+        c.JackPortIsOutput, long_null);
+
     if ((input == null_port) or (output == null_port)) {
         print("no more Jack ports available\n", .{});
         exit(1);
     }
-
     if (c.jack_activate(client) != 0) {
         print("cannot activate client\n", .{});
         exit(1);
     }
-    const hardware_output = @bitCast(c_ulong, @as(c_long, (c.JackPortIsPhysical | c.JackPortIsOutput)));
-    var ports_raw = c.jack_get_ports(client, null, null, hardware_output);
+
+    const hardware_output = c.JackPortIsPhysical | c.JackPortIsOutput;
+    ports_raw = c.jack_get_ports(client, null, null, hardware_output);
     ports = @ptrCast(*[*:0]const u8, ports_raw);
     if (@ptrCast(?* u8, ports) == null_ports) {
         print("no physical capture ports available\n", .{});
@@ -73,14 +78,19 @@ pub fn main() u8 {
     if (c.jack_connect(client, ports.*, c.jack_port_name(input)) != 0) {
         print("cannot connect input ports\n", .{});
     }
-    const hardware_input = @bitCast(c_ulong, @as(c_long, (c.JackPortIsPhysical | c.JackPortIsInput)));
+    const hardware_input = c.JackPortIsPhysical | c.JackPortIsInput;
     ports_raw = c.jack_get_ports(client, null, null, hardware_input);
     ports = @ptrCast(*[*:0]const u8, ports_raw);
+    if (@ptrCast(?* u8, ports) == null_ports) {
+        print("no physical playback ports available\n", .{});
+        exit(1);
+    }
     if (c.jack_connect(client, c.jack_port_name(output), ports.*) != 0) {
         print("connot connect output ports", .{});
     }
-    c.free(@ptrCast(?*c_void, ports));
-    _ = c.sleep(@bitCast(c_uint, -@as(c_int, 1)));
+    c.free(@ptrCast(*c_void, ports));
+    // in C this was -1, which zig is smart enough to reject for unsigned
+    _ = c.sleep(0xFFFFFFFF);
     _ = c.jack_client_close(client);
     return 0;
 }
@@ -93,7 +103,6 @@ export fn process_audio(nframes: c.jack_nframes_t, user_data: ?*c_void) c_int {
     var in = c.jack_port_get_buffer(input, nframes);
     var out = c.jack_port_get_buffer(output, nframes);
 
-    const sample_size = @sizeOf(c.jack_default_audio_sample_t);
     const copy_size = sample_size * nframes;
 
     // just copy input to output
