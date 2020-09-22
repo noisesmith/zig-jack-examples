@@ -88,26 +88,14 @@ export fn shut_down(arg: *c_void) void {
 }
 
 export fn process_audio(nframes: c.jack_nframes_t, user_data: ?*c_void) c_int {
-    var in: [*c]c.jack_default_audio_sample_t = undefined;
-    var out: [*c]c.jack_default_audio_sample_t = undefined;
+    var in = c.jack_port_get_buffer(input, nframes);
+    var out = c.jack_port_get_buffer(output, nframes);
 
-    var raw_in = c.jack_port_get_buffer(input, nframes);
-    var raw_out = c.jack_port_get_buffer(output, nframes);
-    // fix alignment
-    const sample_alignment = @alignOf(c.jack_default_audio_sample_t);
-    var aligned_in = @alignCast(sample_alignment, raw_in);
-    var aligned_out = @alignCast(sample_alignment, raw_out);
-    // fix pointer type
-    in = @ptrCast([*c]c.jack_default_audio_sample_t, aligned_in);
-    out = @ptrCast([*c]c.jack_default_audio_sample_t, aligned_out);
-    // cast all the pointers and sizes correctly
-    var out_ptr = @ptrCast(?*c_void, out);
-    var in_ptr = @ptrCast(?*const c_void, in);
     const sample_size = @sizeOf(c.jack_default_audio_sample_t);
-    const number_frames = @bitCast(c_ulong, @as(c_ulong, nframes));
-    const copy_size = sample_size *% number_frames;
+    const copy_size = sample_size * nframes;
+
     // just copy input to output
-    _ = c.memcpy(out_ptr, in_ptr, copy_size);
+    _ = c.memcpy(out, in, copy_size);
     return 0;
 }
 
