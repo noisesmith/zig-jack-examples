@@ -29,10 +29,10 @@ pub fn main() u8 {
     var server_name: ?*const u8 = null;
     var status: c.jack_status_t = undefined;
     var status_code: i32 = undefined;
-    var ports_raw: [*c][*c]const u8 = undefined;
+    var ports_raw: *?[*:0]const u8 = undefined;
 
-    client = c.jack_client_open(client_name, client_options,
-        &status, server_name);
+    client = c.jack_client_open(client_name, client_options, &status, server_name);
+    defer _ = c.jack_client_close(client);
     status_code = @enumToInt(status);
 
     if (client == null_client) {
@@ -91,7 +91,6 @@ pub fn main() u8 {
     c.free(@ptrCast(*c_void, ports));
     // in C this was -1, which zig is smart enough to reject for unsigned
     _ = c.sleep(0xFFFFFFFF);
-    _ = c.jack_client_close(client);
     return 0;
 }
 
